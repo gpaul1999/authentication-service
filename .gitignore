@@ -44,3 +44,6 @@ firebase-service-account.json
 
 # Application specific
 *.log
+
+# Test scripts
+test-api.sh
