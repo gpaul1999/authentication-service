@@ -43,6 +43,9 @@ public class User {
     @Column
     private LocalDateTime updatedAt;
     
+    @Column(nullable = false)
+    private boolean enabled = true;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

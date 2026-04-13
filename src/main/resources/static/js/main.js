@@ -22,4 +22,38 @@ document.addEventListener('DOMContentLoaded', function () {
       menu.classList.remove('open');
     }
   });
+
+  // ── Services page: Tab switching ──────────────────────────────────────────
+  var tabsContainer = document.querySelector('.tabs');
+  if (tabsContainer) {
+    // Kích hoạt tab đầu tiên khi load (phòng trường hợp CSS chưa xử lý)
+    var firstBtn = tabsContainer.querySelector('.tab-btn.active');
+    if (firstBtn) {
+      var firstTabId = firstBtn.dataset.tabId;
+      activateTab(firstTabId, firstBtn);
+    }
+
+    // Event delegation: lắng nghe click trên toàn bộ .tabs
+    tabsContainer.addEventListener('click', function (e) {
+      var btn = e.target.closest('.tab-btn');
+      if (!btn) return;
+      var tabId = btn.dataset.tabId;
+      activateTab(tabId, btn);
+    });
+  }
+
+  function activateTab(tabId, activeBtn) {
+    // Ẩn tất cả tab content
+    document.querySelectorAll('.service-tab-content').forEach(function (el) {
+      el.classList.remove('active');
+    });
+    // Bỏ active tất cả tab button
+    document.querySelectorAll('.tab-btn').forEach(function (el) {
+      el.classList.remove('active');
+    });
+    // Hiện tab được chọn
+    var target = document.getElementById('tab-' + tabId);
+    if (target) target.classList.add('active');
+    if (activeBtn) activeBtn.classList.add('active');
+  }
 });
