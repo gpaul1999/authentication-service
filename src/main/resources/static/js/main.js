@@ -24,7 +24,288 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // ── Services page: Tab switching is now server-side (URL-driven), no JS needed ──
+  // ── Search (debounced dropdown) ──────────────────────────────────────────
+  var searchInput = document.getElementById('siteSearchInput');
+  var searchBtn = document.getElementById('siteSearchBtn');
+  var searchDropdown = document.getElementById('searchDropdown');
+  var debounceTimer = null;
+  var selectedIndex = -1; // Track keyboard selection
+
+  // Client-side cache for dropdown queries (simple LRU-like with cap)
+  var searchCache = new Map();
+  var cacheOrder = [];
+  var CACHE_LIMIT = 60;
+
+  function cachePut(key, value) {
+    if (searchCache.has(key)) {
+      // refresh order
+      var idx = cacheOrder.indexOf(key);
+      if (idx !== -1) cacheOrder.splice(idx, 1);
+    }
+    cacheOrder.unshift(key);
+    searchCache.set(key, value);
+    if (cacheOrder.length > CACHE_LIMIT) {
+      var old = cacheOrder.pop();
+      searchCache.delete(old);
+    }
+  }
+
+  function cacheGet(key) {
+    if (!searchCache.has(key)) return null;
+    // refresh order
+    var idx = cacheOrder.indexOf(key);
+    if (idx !== -1) {
+      cacheOrder.splice(idx, 1);
+      cacheOrder.unshift(key);
+    }
+    return searchCache.get(key);
+  }
+
+  // Score results for better accuracy (promote items with query at start of syntax, then contains in syntax, then description)
+  function scoreItem(item, q) {
+    if (!q) return 0;
+    var s = 0;
+    var ql = q.toLowerCase();
+    if (item.syntax) {
+      var t = String(item.syntax).toLowerCase();
+      if (t === ql) s += 100;
+      else if (t.startsWith(ql)) s += 60;
+      else if (t.indexOf(ql) !== -1) s += 30;
+    }
+    if (item.description) {
+      var d = String(item.description).toLowerCase();
+      if (d.indexOf(ql) !== -1) s += 10;
+    }
+    // small boost if on sale
+    if (item.saleOff) s += 5;
+    return s;
+  }
+
+  // Highlight matched query in text (simple substring, case-insensitive)
+  function highlightMatch(text, q) {
+    if (!text || !q) return escapeHtml(text || '');
+    try {
+      var qi = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // escape regex
+      var re = new RegExp('(' + qi + ')', 'ig');
+      return escapeHtml(String(text)).replace(re, '<span class="search-highlight">$1</span>');
+    } catch (e) { return escapeHtml(text); }
+  }
+
+  function renderDropdown(items, q) {
+    if (!searchDropdown) return;
+    if (!items || items.length === 0) {
+      searchDropdown.style.display = 'none';
+      searchDropdown.innerHTML = '';
+      selectedIndex = -1;
+      return;
+    }
+
+    // sort by score for better accuracy
+    if (q) {
+      items = items.slice();
+      items.sort(function (a, b) {
+        return scoreItem(b, q) - scoreItem(a, q);
+      });
+    }
+
+    var html = '<div class="search-grid">';
+    items.forEach(function (p) {
+      var id = p.id;
+      var title = p.syntax || p.description || (p.id ? ('Sản phẩm ' + p.id) : '');
+      var desc = p.description || '';
+      var type = p.productTypeName || '';
+      var images = p.images || [];
+      var price = p.price != null ? formatPrice(p.price) : '';
+      var sale = p.salePrice != null ? formatPrice(p.salePrice) : '';
+      var salePct = p.salePercent != null && p.salePercent > 0 ? p.salePercent + '%' : '';
+
+      html += '<div class="search-item" data-id="' + id + '">';
+
+      // small multi-thumb preview: show up to 3 thumbs, or a single main image
+      html += '<div class="s-img">';
+      if (images.length === 0) {
+        html += '<div class="s-img-placeholder">📦</div>';
+      } else if (images.length === 1) {
+        html += '<img src="' + escapeHtml(images[0]) + '" alt="' + escapeHtml(title) + '"/>';
+      } else {
+        html += '<div class="s-thumbs">';
+        for (var i = 0; i < Math.min(3, images.length); i++) {
+          html += '<div class="s-thumb"><img src="' + escapeHtml(images[i]) + '" alt="' + escapeHtml(title) + '"/></div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+
+      html += '<div class="s-info">';
+      html += '<div class="s-top">';
+      if (type) html += '<span class="product-card-type">' + escapeHtml(type) + '</span>';
+      if (salePct) html += '<span class="badge-sale" style="margin-left:8px">-' + escapeHtml(salePct) + '</span>';
+      html += '</div>';
+
+      // highlight matches in title and description using q
+      html += '<div class="s-title">' + highlightMatch(title, q) + '</div>';
+      html += '<div class="s-desc">' + highlightMatch(shorten(desc, 120), q) + '</div>';
+
+      html += '<div class="s-price-group">';
+      if (sale) {
+        html += '<div class="product-price-original">' + escapeHtml(price) + '</div>';
+        html += '<div class="product-price-sale">' + escapeHtml(sale) + '</div>';
+      } else {
+        html += '<div class="product-price" style="font-weight:800">' + escapeHtml(price) + '</div>';
+      }
+      html += '</div>';
+
+      html += '</div>'; // s-info
+      html += '</div>'; // search-item
+    });
+    html += '</div>';
+
+    searchDropdown.innerHTML = html;
+    searchDropdown.style.display = 'block';
+    selectedIndex = -1; // reset selection on new render
+
+    // Attach click handlers
+    searchDropdown.querySelectorAll('.search-item').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var id = el.getAttribute('data-id');
+        if (id) {
+          window.location.href = '/product/' + id;
+        }
+      });
+    });
+  }
+
+  function navigateDropdown(direction) {
+    var items = searchDropdown.querySelectorAll('.search-item');
+    if (items.length === 0) return;
+
+    // Update selectedIndex
+    if (direction === 'next') {
+      selectedIndex = (selectedIndex + 1) % items.length;
+    } else if (direction === 'prev') {
+      selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+    }
+
+    // Update UI: remove old highlight, add to new
+    items.forEach(function (el, idx) {
+      if (idx === selectedIndex) {
+        el.classList.add('search-item-selected');
+        // Scroll into view
+        el.scrollIntoView({ block: 'nearest' });
+      } else {
+        el.classList.remove('search-item-selected');
+      }
+    });
+  }
+
+  function selectCurrentItem() {
+    var items = searchDropdown.querySelectorAll('.search-item');
+    if (selectedIndex >= 0 && selectedIndex < items.length) {
+      var id = items[selectedIndex].getAttribute('data-id');
+      if (id) {
+        window.location.href = '/product/' + id;
+      }
+    }
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    return String(text).replace(/[&<>"']/g, function (s) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[s];
+    });
+  }
+
+  function doDropdownQuery(q) {
+    var key = (q || '').trim().toLowerCase();
+    if (!q || q.trim().length === 0) {
+      renderDropdown([]);
+      return;
+    }
+
+    // Check cache
+    var cached = cacheGet(key);
+    if (cached) {
+      renderDropdown(cached, q);
+      return;
+    }
+
+    fetch('/api/data/products/search/dropdown?q=' + encodeURIComponent(q.trim()))
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        // cache results
+        cachePut(key, data);
+        renderDropdown(data, q);
+      })
+      .catch(function (err) { console.error('Search dropdown error', err); renderDropdown([]); });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', function (e) {
+      var v = e.target.value;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function () {
+        doDropdownQuery(v);
+      }, 1000); // 1s debounce
+    });
+
+    // Keyboard navigation
+    searchInput.addEventListener('keydown', function (e) {
+      if (!searchDropdown || searchDropdown.style.display === 'none') {
+        // Dropdown not shown
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var q = searchInput.value || '';
+          if (q.trim().length > 0) {
+            window.location.href = '/services?keyword=' + encodeURIComponent(q.trim()) + '&filtered=true';
+          }
+        }
+        return;
+      }
+
+      var items = searchDropdown.querySelectorAll('.search-item');
+      if (items.length === 0) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        navigateDropdown('next');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        navigateDropdown('prev');
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedIndex >= 0) {
+          selectCurrentItem();
+        } else {
+          // No selection, treat as full search
+          var q = searchInput.value || '';
+          if (q.trim().length > 0) {
+            window.location.href = '/services?keyword=' + encodeURIComponent(q.trim()) + '&filtered=true';
+          }
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        searchDropdown.style.display = 'none';
+        selectedIndex = -1;
+      }
+    });
+
+    // Hide dropdown when clicking outside
+    document.addEventListener('click', function (e) {
+      if (!searchDropdown.contains(e.target) && !searchInput.contains(e.target)) {
+        if (searchDropdown) searchDropdown.style.display = 'none';
+        selectedIndex = -1;
+      }
+    });
+  }
+
+  if (searchBtn) {
+    searchBtn.addEventListener('click', function () {
+      var q = searchInput.value || '';
+      if (q.trim().length > 0) {
+        window.location.href = '/services?keyword=' + encodeURIComponent(q.trim()) + '&filtered=true';
+      }
+    });
+  }
 
   // ── Gallery image switcher ────────────────────────────────────────────────
   window.switchImg = function (thumb, src) {
@@ -99,5 +380,19 @@ document.addEventListener('DOMContentLoaded', function () {
     }, duration / steps);
   }
 
-});
+  function formatPrice(v) {
+    try {
+      // v may be number or string
+      var n = typeof v === 'number' ? v : Number(v);
+      if (isNaN(n)) return '';
+      return n.toLocaleString('vi-VN') + '₫';
+    } catch (e) { return String(v); }
+  }
 
+  function shorten(text, max) {
+    if (!text) return '';
+    if (text.length <= max) return text;
+    return text.substring(0, max - 1).trim() + '…';
+  }
+
+});

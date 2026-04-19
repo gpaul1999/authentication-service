@@ -7,6 +7,7 @@ import com.customsalesite.entity.ProductDetail;
 import com.customsalesite.entity.ProductType;
 import com.customsalesite.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
@@ -120,6 +121,52 @@ public class DataService {
         return new ProductPageData(productResponse, detailResponse);
     }
 
+    public List<ProductResponse> searchProductsDropdown(String q, int limit) {
+        if (q == null || q.trim().isEmpty()) return List.of();
+        return productRepository.searchByKeyword(q.trim(), PageRequest.of(0, limit, Sort.by("id").ascending()))
+                .stream().map(this::toProductResponse).collect(Collectors.toList());
+    }
+
+    public List<ProductResponse> searchProducts(String q) {
+        if (q == null || q.trim().isEmpty()) return List.of();
+        return productRepository.searchByKeyword(q.trim(), PageRequest.of(0, 100, Sort.by("id").ascending()))
+                .stream().map(this::toProductResponse).collect(Collectors.toList());
+    }
+
+    // Score + sort search results like dropdown (for /services search page)
+    public List<ProductResponse> searchProductsWithScore(String q) {
+        if (q == null || q.trim().isEmpty()) return List.of();
+
+        List<Product> results = productRepository.searchByKeyword(q.trim(), PageRequest.of(0, 1000, Sort.by("id").ascending()))
+                .stream().collect(Collectors.toList());
+
+        // Score each product
+        results.sort((a, b) -> scoreProduct(b, q) - scoreProduct(a, q));
+
+        return results.stream().map(this::toProductResponse).collect(Collectors.toList());
+    }
+
+    private int scoreProduct(Product p, String q) {
+        int score = 0;
+        String ql = q.toLowerCase();
+
+        if (p.getSyntax() != null) {
+            String t = p.getSyntax().toLowerCase();
+            if (t.equals(ql)) score += 100;
+            else if (t.startsWith(ql)) score += 60;
+            else if (t.contains(ql)) score += 30;
+        }
+
+        if (p.getDescription() != null) {
+            String d = p.getDescription().toLowerCase();
+            if (d.contains(ql)) score += 10;
+        }
+
+        if (p.isSaleOff()) score += 5;
+
+        return score;
+    }
+
     public record ProductPageData(ProductResponse product, ProductDetailResponse detail) {}
 
     private ProductTypeResponse toProductTypeResponse(ProductType pt) {
@@ -193,4 +240,3 @@ public class DataService {
         );
     }
 }
-

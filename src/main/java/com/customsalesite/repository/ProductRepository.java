@@ -1,8 +1,12 @@
 package com.customsalesite.repository;
 
 import com.customsalesite.entity.Product;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -13,5 +17,7 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     List<Product> findBySaleOff(boolean saleOff);
     List<Product> findByEnabled(boolean enabled);
     List<Product> findByProductTypeIdAndEnabled(Long productTypeId, boolean enabled);
-}
 
+    @Query("select p from Product p where p.enabled = true and (lower(p.syntax) like lower(concat('%', :q, '%')) or lower(p.description) like lower(concat('%', :q, '%'))) ")
+    Page<Product> searchByKeyword(@Param("q") String q, Pageable pageable);
+}

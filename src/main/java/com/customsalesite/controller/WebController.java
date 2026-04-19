@@ -52,12 +52,22 @@ public class WebController {
         }
 
         Map<Long, List<ProductResponse>> productsByType = new LinkedHashMap<>();
-        for (ProductTypeResponse pt : productTypes) {
-            if (pt.getId().equals(activeTypeId) && filtered) {
-                productsByType.put(pt.getId(), dataService.filterProducts(
-                        activeTypeId, keyword, minPrice, maxPrice, saleOnly, brandId, sortBy));
-            } else {
-                productsByType.put(pt.getId(), dataService.getProductsByType(pt.getId()));
+
+        // If keyword search with filtered=true, show search results across ALL types
+        if (filtered && keyword != null && !keyword.isBlank()) {
+            List<ProductResponse> searchResults = dataService.searchProductsWithScore(keyword);
+            for (ProductTypeResponse pt : productTypes) {
+                productsByType.put(pt.getId(), searchResults);
+            }
+        } else {
+            // Normal tab-based browsing
+            for (ProductTypeResponse pt : productTypes) {
+                if (pt.getId().equals(activeTypeId) && filtered) {
+                    productsByType.put(pt.getId(), dataService.filterProducts(
+                            activeTypeId, keyword, minPrice, maxPrice, saleOnly, brandId, sortBy));
+                } else {
+                    productsByType.put(pt.getId(), dataService.getProductsByType(pt.getId()));
+                }
             }
         }
 

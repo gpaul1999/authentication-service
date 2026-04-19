@@ -12,12 +12,19 @@
         [[${brandName}]]
       </a>
 
+      <!-- Search (center) -->
+      <div class="header-search">
+        <form id="siteSearchForm" onsubmit="return false;" class="search-form" style="display:flex;align-items:center;">
+          <input id="siteSearchInput" type="search" placeholder="Tìm sản phẩm, dịch vụ..." aria-label="Tìm kiếm" autocomplete="off" />
+          <button id="siteSearchBtn" type="button" class="btn">🔍</button>
+        </form>
+        <div id="searchDropdown" class="search-dropdown" style="display:none;"></div>
+      </div>
+
       <!-- Nav links -->
       <ul class="navbar-nav" id="navMenu">
         <li><a href="/"         th:classappend="${activePage == 'home'}     ? 'active'">Trang chủ</a></li>
         <li><a href="/services" th:classappend="${activePage == 'services'} ? 'active'">Dịch vụ</a></li>
-        <li><a href="/about"    th:classappend="${activePage == 'about'}    ? 'active'">Giới thiệu</a></li>
-        <li><a href="/contact"  th:classappend="${activePage == 'contact'}  ? 'active'">Liên hệ</a></li>
         <li><a href="/contact" class="btn btn-accent btn-sm"
                style="margin-left:8px; border:none; box-shadow:0 2px 8px rgba(245,158,11,.3);">
           📞 Tư vấn ngay
@@ -41,4 +48,3 @@
 
 </body>
 </html>
-
